@@ -1,6 +1,6 @@
 {
   "watch": ["./"],
   "delay": "100",
-  "ext": "js,json",
+  "ext": "js,json,ts",
   "legacyWatch": true
 }

@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import express from "express";
 import { Server, Socket } from "socket.io";
+
 import UNIQUE_ID from "./helper/id-generator";
 import middleware from "./middleware/middleware";
 import router from "./routes/route";
@@ -27,49 +28,47 @@ const io: Server = new Server(server, {
   },
 });
 
-// Define a custom interface extending the Socket interface
-interface CustomSocket extends Socket {
-  roomId?: string;
-}
-
-const roomCreator = new Map<string, string>(); // roomid => socketid
-
-interface connectedUser {
+interface CONNECTED_USER {
   userId: string;
-  joinAt: Date;
   position: { lat: number; lng: number };
   userName: string;
+  userEmail: string;
+  hostPosition: { lat: number; lng: number };
   updatedAt: Date;
+  joinAt: Date;
 }
 
-interface userRoom {
+interface HOST_ROOM {
   roomId: string;
   position: { lat: number; lng: number };
-  totalConnectedUsers: connectedUser[];
+  totalConnectedUsers: CONNECTED_USER[];
   hostId: string;
   hostName: string;
+  hostEmail: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-const rooms: userRoom[] = [];
+const rooms: HOST_ROOM[] = [];
 
-io.on("connection", (socket: CustomSocket) => {
-  console.log(`User connected: ${socket.id}`);
+io.on("connection", (socket: Socket) => {
+  console.log(`User connected: id- ${socket.id}`);
 
   socket.on("createRoom", (data) => {
-    console.log("createRoom");
-    // create room
-    // check if user already has a room
-    const userRoom = rooms.find((room) => room.hostId === socket.id);
+    console.log("createRoom, host" + socket.id);
 
-    if (!userRoom) {
+    // check if host already has a room
+    const hasHostRoom = rooms.find((room) => room.hostId === socket.id);
+
+    if (!hasHostRoom) {
       const roomId =
         UNIQUE_ID.next().value?.toString() || Math.random().toString();
-      // create a new room
+
+      // create a new room and add host to it
       socket.join(roomId);
 
-      const connectedUserRoom = {
+      // room data
+      const hostRoom: HOST_ROOM = {
         roomId,
         position: data.position,
         totalConnectedUsers: [],
@@ -77,66 +76,70 @@ io.on("connection", (socket: CustomSocket) => {
         hostName: data.hostName,
         createdAt: new Date(),
         updatedAt: new Date(),
+        hostEmail: data.hostEmail,
       };
       // data add to rooms
-      rooms.push(connectedUserRoom);
+      rooms.push(hostRoom);
 
+      // send room data to host
       socket.emit("roomCreated", {
-        ...connectedUserRoom,
+        ...hostRoom,
       });
     }
   });
 
-  socket.on("joinRoom", (data) => {
+  socket.on("joinRoom", (data, callback) => {
     console.log("joinRoom");
 
     // check if room exists
     const roomExists = rooms.find((room) => room.roomId === data.roomId);
-    const connectUser = {
+
+    const connectUser: CONNECTED_USER = {
       userId: socket.id,
       joinAt: new Date(),
-      position: roomExists?.position || data.position,
+      position: data.position,
+      hostPosition: roomExists?.position || { lat: 0, lng: 0 },
       updatedAt: new Date(),
       userName: data.userName,
+      userEmail: data.userEmail,
     };
 
     if (roomExists) {
       socket.join(data.roomId);
-
       const hostUser = io.sockets.sockets.get(roomExists.hostId);
       if (hostUser) {
         // update total connected users
         roomExists.totalConnectedUsers.push(connectUser);
-
-        console.log("userJoinedRoom", connectUser);
-
+        // notify host that user joined room
         hostUser.emit("userJoinedRoom", {
           ...connectUser,
         });
       }
       // msg to joiner
       io.to(`${socket.id}`).emit("roomJoined", {
-        status: "OK",
         roomId: data.roomId,
         joinedAt: new Date(),
         userId: socket.id,
-        position: roomExists.position,
+        position: data.position,
+        hostPosition: roomExists?.position || { lat: 0, lng: 0 },
         updatedAt: new Date(),
         hostId: roomExists.hostId,
         hostName: roomExists.hostName,
-        createdAt: new Date(),
+        hostEmail: roomExists.hostEmail,
       });
-      // io.to(`${socket.id}`).emit("userJoinedRoom", {
-      //   ...connectUser,
-      // });
+
+      callback(true);
     } else {
       io.to(`${socket.id}`).emit("roomJoined", {
         status: "ERROR",
       });
+
+      callback(false);
     }
   });
   socket.on("leaveRoom", (data) => {
     console.log("leaveRoom");
+
     socket.leave(data.roomId);
     io.to(`${socket.id}`).emit("roomLeft", {
       status: "OK",
@@ -148,8 +151,6 @@ io.on("connection", (socket: CustomSocket) => {
   });
 
   socket.on("updateLocation", (data) => {
-    console.log("updateLocation", data);
-
     io.emit("updateLocationResponse", data);
   });
 
