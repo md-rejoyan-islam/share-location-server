@@ -151,6 +151,8 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("updateLocation", (data) => {
+    console.log("updateLocation", data);
+
     io.emit("updateLocationResponse", data);
   });
 
